@@ -53,7 +53,7 @@ const Demo = () => {
     setError(null);
     try {
       const formData = new FormData();
-      formData.append("image", imageFile);
+      formData.append("file", imageFile);
       const attackParam = attackMode === "none" ? "none" : epsilon;
       const res = await fetch(
         `http://localhost:8000/classify?model=${model}&attack=${attackParam}`,
