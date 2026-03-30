@@ -179,36 +179,52 @@ const Demo = () => {
         </div>
 
         {/* Right panel */}
-        <div className="flex flex-col gap-6">
-          {/* Images */}
-          <div className="rounded-2xl border border-border bg-card p-6">
-            <div className="grid grid-cols-2 gap-6">
-              <div className="flex flex-col items-center gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clean image</span>
-                <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30">
-                  {imagePreview ? (
-                    <img src={imagePreview} alt="Clean X-ray" className="max-h-full max-w-full rounded-lg object-contain" />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No image</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col items-center gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">MDA heatmap overlay</span>
-                <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30">
-                  {result?.heatmap_base64 ? (
-                    <img
-                      src={`data:image/png;base64,${result.heatmap_base64}`}
-                      alt="Heatmap"
-                      className="max-h-full max-w-full rounded-lg object-contain"
-                    />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No heatmap</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+<div className="flex flex-col gap-6">
+  {/* Images */}
+  <div className="rounded-2xl border border-border bg-card p-6">
+    <div className="grid grid-cols-2 gap-6">
+      
+      {/* Clean Image */}
+      <div className="flex flex-col items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Clean image
+        </span>
+
+        <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
+          {imagePreview ? (
+            <img
+              src={imagePreview}
+              alt="Clean X-ray"
+              className="max-h-56 max-w-56 object-contain rounded-lg"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">No image</span>
+          )}
+        </div>
+      </div>
+
+      {/* Heatmap */}
+      <div className="flex flex-col items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          MDA heatmap overlay
+        </span>
+
+        <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
+          {result?.heatmap_base64 ? (
+            <img
+              src={`data:image/png;base64,${result.heatmap_base64}`}
+              alt="Heatmap"
+              className="max-h-56 max-w-56 object-contain rounded-lg"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">No heatmap</span>
+          )}
+        </div>
+      </div>
+
+    </div>
+  </div>
+
 
           {/* Results */}
           <div className="rounded-2xl border border-border bg-card p-6">
