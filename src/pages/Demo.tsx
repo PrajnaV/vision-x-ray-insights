@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Upload, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -8,7 +8,15 @@ type AttackMode = "none" | "attack";
 interface ClassificationResult {
   predicted_class: string;
   confidence_scores: Record<string, number>;
-  heatmap_base64: string;
+  heatmap_id: string;
+  heatmap_status: string;
+  heatmap_base64?: string;
+}
+
+interface HeatmapResponse {
+  status: "pending" | "ready" | "error";
+  heatmap_base64?: string;
+  error?: string;
 }
 
 const CLASS_LABELS = ["COVID", "Normal", "Lung_Opacity", "Viral_Pneumonia"];
@@ -25,7 +33,7 @@ const MODELS: { value: ModelType; label: string; desc: string }[] = [
   { value: "pgd", label: "PGD-robust ViT", desc: "Strongest defence" },
 ];
 
-const EPSILONS = ["0.002", "0.003", "0.005"];
+const EPSILONS = ["0.002", "0.003", "0.004", "0.005"];
 
 const Demo = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -36,6 +44,7 @@ const Demo = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ClassificationResult | null>(null);
+  const [heatmapError, setHeatmapError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,7 +54,44 @@ const Demo = () => {
     setImagePreview(URL.createObjectURL(file));
     setResult(null);
     setError(null);
+    setHeatmapError(null);
   }, []);
+
+  // Poll for heatmap completion
+  useEffect(() => {
+    if (!result || !result.heatmap_id || result.heatmap_base64) return;
+
+    const pollHeatmap = async () => {
+      try {
+        const res = await fetch(
+          `http://localhost:8000/heatmap/${result.heatmap_id}`,
+        );
+        if (!res.ok) throw new Error(`Server error (${res.status})`);
+        const data: HeatmapResponse = await res.json();
+
+        if (data.status === "ready" && data.heatmap_base64) {
+          setResult((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  heatmap_base64: data.heatmap_base64,
+                  heatmap_status: "ready",
+                }
+              : null,
+          );
+          setHeatmapError(null);
+        } else if (data.status === "error") {
+          setHeatmapError(data.error || "Failed to generate heatmap");
+        }
+        // If pending, continue polling
+      } catch (err: any) {
+        setHeatmapError(err.message || "Failed to fetch heatmap");
+      }
+    };
+
+    const pollInterval = setInterval(pollHeatmap, 500);
+    return () => clearInterval(pollInterval);
+  }, [result]);
 
   const runClassification = async () => {
     if (!imageFile) return;
@@ -54,10 +100,15 @@ const Demo = () => {
     try {
       const formData = new FormData();
       formData.append("file", imageFile);
-      const attackParam = attackMode === "none" ? "none" : epsilon;
+      const attackEnabled = attackMode === "attack";
+      const query = new URLSearchParams({
+        model,
+        attack: String(attackEnabled),
+        ...(attackEnabled ? { epsilon } : {}),
+      });
       const res = await fetch(
-        `http://localhost:8000/classify?model=${model}&attack=${attackParam}`,
-        { method: "POST", body: formData }
+        `http://localhost:8000/classify?${query.toString()}`,
+        { method: "POST", body: formData },
       );
       if (!res.ok) throw new Error(`Server error (${res.status})`);
       const data: ClassificationResult = await res.json();
@@ -88,14 +139,26 @@ const Demo = () => {
         <div className="flex flex-col gap-4">
           {/* Upload */}
           <div className="rounded-2xl border border-border bg-card p-5 card-hover">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">X-ray image</p>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              X-ray image
+            </p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={onFileChange}
+            />
             <button
               onClick={() => fileRef.current?.click()}
               className="flex w-full flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-6 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/[0.02] hover:text-primary"
             >
               {imagePreview ? (
-                <img src={imagePreview} alt="Uploaded X-ray" className="max-h-40 rounded-lg object-contain" />
+                <img
+                  src={imagePreview}
+                  alt="Uploaded X-ray"
+                  className="max-h-40 rounded-lg object-contain"
+                />
               ) : (
                 <>
                   <div className="rounded-xl bg-muted p-3">
@@ -109,7 +172,9 @@ const Demo = () => {
 
           {/* Model */}
           <div className="rounded-2xl border border-border bg-card p-5 card-hover">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model</p>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Model
+            </p>
             <div className="flex flex-col gap-2">
               {MODELS.map((m) => (
                 <label
@@ -128,8 +193,12 @@ const Demo = () => {
                     className="accent-primary"
                   />
                   <div>
-                    <span className="text-sm font-medium text-foreground">{m.label}</span>
-                    <span className="block text-xs text-muted-foreground">{m.desc}</span>
+                    <span className="text-sm font-medium text-foreground">
+                      {m.label}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {m.desc}
+                    </span>
                   </div>
                 </label>
               ))}
@@ -138,7 +207,9 @@ const Demo = () => {
 
           {/* Attack */}
           <div className="rounded-2xl border border-border bg-card p-5 card-hover">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Attack</p>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Attack
+            </p>
             <div className="flex gap-2">
               {(["none", "attack"] as const).map((a) => (
                 <button
@@ -161,7 +232,9 @@ const Demo = () => {
                 className="mt-3 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm"
               >
                 {EPSILONS.map((ep) => (
-                  <option key={ep} value={ep}>ε = {ep}</option>
+                  <option key={ep} value={ep}>
+                    ε = {ep}
+                  </option>
                 ))}
               </select>
             )}
@@ -179,52 +252,65 @@ const Demo = () => {
         </div>
 
         {/* Right panel */}
-<div className="flex flex-col gap-6">
-  {/* Images */}
-  <div className="rounded-2xl border border-border bg-card p-6">
-    <div className="grid grid-cols-2 gap-6">
-      
-      {/* Clean Image */}
-      <div className="flex flex-col items-center gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Clean image
-        </span>
+        <div className="flex flex-col gap-6">
+          {/* Images */}
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="grid grid-cols-2 gap-6">
+              {/* Clean Image */}
+              <div className="flex flex-col items-center gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Clean image
+                </span>
 
-        <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
-          {imagePreview ? (
-            <img
-              src={imagePreview}
-              alt="Clean X-ray"
-              className="max-h-56 max-w-56 object-contain rounded-lg"
-            />
-          ) : (
-            <span className="text-xs text-muted-foreground">No image</span>
-          )}
-        </div>
-      </div>
+                <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
+                  {imagePreview ? (
+                    <img
+                      src={imagePreview}
+                      alt="Clean X-ray"
+                      className="max-h-56 max-w-56 object-contain rounded-lg"
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      No image
+                    </span>
+                  )}
+                </div>
+              </div>
 
-      {/* Heatmap */}
-      <div className="flex flex-col items-center gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          MDA heatmap overlay
-        </span>
+              {/* Heatmap */}
+              <div className="flex flex-col items-center gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  MDA heatmap overlay
+                </span>
 
-        <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
-          {result?.heatmap_base64 ? (
-            <img
-              src={`data:image/png;base64,${result.heatmap_base64}`}
-              alt="Heatmap"
-              className="max-h-56 max-w-56 object-contain rounded-lg"
-            />
-          ) : (
-            <span className="text-xs text-muted-foreground">No heatmap</span>
-          )}
-        </div>
-      </div>
-
-    </div>
-  </div>
-
+                <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-border bg-muted/30 p-2">
+                  {result?.heatmap_base64 ? (
+                    <img
+                      src={`data:image/png;base64,${result.heatmap_base64}`}
+                      alt="Heatmap"
+                      className="max-h-56 max-w-56 object-contain rounded-lg"
+                    />
+                  ) : result && result.heatmap_status === "pending" ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="text-xs text-muted-foreground">
+                        Generating visualization...
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      No heatmap
+                    </span>
+                  )}
+                </div>
+                {heatmapError && (
+                  <span className="text-xs text-destructive">
+                    {heatmapError}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Results */}
           <div className="rounded-2xl border border-border bg-card p-6">
@@ -242,9 +328,16 @@ const Demo = () => {
               <div className="space-y-6">
                 <div className="rounded-xl bg-gradient-to-r from-primary/10 to-accent/5 px-5 py-4 text-center">
                   <span className="text-sm font-medium text-primary">
-                    Predicted: <strong>{CLASS_DISPLAY[result.predicted_class] ?? result.predicted_class}</strong>
+                    Predicted:{" "}
+                    <strong>
+                      {CLASS_DISPLAY[result.predicted_class] ??
+                        result.predicted_class}
+                    </strong>
                     {" · "}
-                    {(result.confidence_scores[result.predicted_class] * 100).toFixed(1)}% confidence
+                    {(
+                      result.confidence_scores[result.predicted_class] * 100
+                    ).toFixed(1)}
+                    % confidence
                   </span>
                 </div>
                 <div className="space-y-4">
@@ -254,10 +347,22 @@ const Demo = () => {
                     return (
                       <div key={cls} className="space-y-1.5">
                         <div className="flex justify-between text-sm">
-                          <span className={isPredicted ? "font-semibold text-foreground" : "text-muted-foreground"}>
+                          <span
+                            className={
+                              isPredicted
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground"
+                            }
+                          >
                             {CLASS_DISPLAY[cls]}
                           </span>
-                          <span className={isPredicted ? "font-semibold text-foreground" : "text-muted-foreground"}>
+                          <span
+                            className={
+                              isPredicted
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground"
+                            }
+                          >
                             {(score * 100).toFixed(1)}%
                           </span>
                         </div>

@@ -67,9 +67,7 @@ const About = () => {
           >
             Try the demo
           </Button>
-          <Button variant="outline" size="lg" className="rounded-full px-8">
-            View report
-          </Button>
+          
         </div>
       </section>
 
