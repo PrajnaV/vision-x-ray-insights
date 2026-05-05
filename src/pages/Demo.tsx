@@ -43,9 +43,13 @@ const Demo = () => {
   const [epsilon, setEpsilon] = useState("0.002");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // `result` drives heatmap polling — set immediately when API responds
   const [result, setResult] = useState<ClassificationResult | null>(null);
+  // `predictionResult` drives the prediction UI — set after 20s delay
+  const [predictionResult, setPredictionResult] = useState<ClassificationResult | null>(null);
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const predictionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -53,11 +57,12 @@ const Demo = () => {
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
     setResult(null);
+    setPredictionResult(null);
     setError(null);
     setHeatmapError(null);
   }, []);
 
-  // Poll for heatmap completion
+  // Poll for heatmap completion — unchanged, driven by `result` (set immediately)
   useEffect(() => {
     if (!result || !result.heatmap_id || result.heatmap_base64) return;
 
@@ -93,10 +98,27 @@ const Demo = () => {
     return () => clearInterval(pollInterval);
   }, [result]);
 
+  // Keep predictionResult's heatmap_base64 in sync as heatmap arrives,
+  // so the heatmap panel (which reads from `result`) stays independent.
+  // Nothing extra needed here — heatmap panel reads `result` directly.
+
+  // Cleanup prediction timer on unmount
+  useEffect(() => {
+    return () => {
+      if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+    };
+  }, []);
+
   const runClassification = async () => {
     if (!imageFile) return;
     setLoading(true);
     setError(null);
+    setResult(null);
+    setPredictionResult(null);
+
+    // Clear any pending prediction timer from a prior run
+    if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+
     try {
       const formData = new FormData();
       formData.append("file", imageFile);
@@ -112,7 +134,14 @@ const Demo = () => {
       );
       if (!res.ok) throw new Error(`Server error (${res.status})`);
       const data: ClassificationResult = await res.json();
+
+      // Set immediately so heatmap polling starts right away
       setResult(data);
+
+      // Delay showing the prediction result by 20 seconds
+      predictionTimerRef.current = setTimeout(() => {
+        setPredictionResult(data);
+      }, 20000);
     } catch (err: any) {
       setError(err.message || "Classification failed");
     } finally {
@@ -277,7 +306,7 @@ const Demo = () => {
                 </div>
               </div>
 
-              {/* Heatmap */}
+              {/* Heatmap — reads from `result`, unchanged */}
               <div className="flex flex-col items-center gap-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   MDA heatmap overlay
@@ -312,38 +341,47 @@ const Demo = () => {
             </div>
           </div>
 
-          {/* Results */}
+          {/* Results — reads from `predictionResult`, shown after 20s delay */}
           <div className="rounded-2xl border border-border bg-card p-6">
             {error && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
                 {error}
               </div>
             )}
-            {!result && !error && (
+            {/* Show a waiting state while API has responded but delay hasn't elapsed */}
+            {result && !predictionResult && !error && (
+              <div className="flex flex-col items-center gap-3 py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">
+                  Analysing results…
+                </p>
+              </div>
+            )}
+            {!result && !predictionResult && !error && (
               <p className="py-12 text-center text-sm text-muted-foreground">
                 Run the classifier to see results
               </p>
             )}
-            {result && (
+            {predictionResult && (
               <div className="space-y-6">
                 <div className="rounded-xl bg-gradient-to-r from-primary/10 to-accent/5 px-5 py-4 text-center">
                   <span className="text-sm font-medium text-primary">
                     Predicted:{" "}
                     <strong>
-                      {CLASS_DISPLAY[result.predicted_class] ??
-                        result.predicted_class}
+                      {CLASS_DISPLAY[predictionResult.predicted_class] ??
+                        predictionResult.predicted_class}
                     </strong>
                     {" · "}
                     {(
-                      result.confidence_scores[result.predicted_class] * 100
+                      predictionResult.confidence_scores[predictionResult.predicted_class] * 100
                     ).toFixed(1)}
                     % confidence
                   </span>
                 </div>
                 <div className="space-y-4">
                   {CLASS_LABELS.map((cls) => {
-                    const score = result.confidence_scores[cls] ?? 0;
-                    const isPredicted = cls === result.predicted_class;
+                    const score = predictionResult.confidence_scores[cls] ?? 0;
+                    const isPredicted = cls === predictionResult.predicted_class;
                     return (
                       <div key={cls} className="space-y-1.5">
                         <div className="flex justify-between text-sm">
